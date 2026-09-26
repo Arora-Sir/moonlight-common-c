@@ -104,6 +104,11 @@ typedef struct _STREAM_CONFIGURATION {
 
     // Enables client-to-host microphone streaming when negotiated with the host.
     bool enableMic;
+
+    // KAST: how long (in milliseconds) the control stream may stay silent before ENet declares the
+    // host dead and the connection terminates with -1. 0 keeps the historical default of 10 seconds.
+    // The host has its own timeouts (Sunshine ping_timeout, ENet peer timeout) - the smallest wins.
+    int controlPeerTimeoutMs;
 } STREAM_CONFIGURATION, *PSTREAM_CONFIGURATION;
 
 // Use this function to zero the stream configuration when allocated on the stack or heap
@@ -583,6 +588,12 @@ bool LiIsMicrophoneStreamActive(void);
 // ENet for the control stream (very old versions), or if the ENet peer is not connected.
 // This function may only be called between LiStartConnection() and LiStopConnection().
 bool LiGetEstimatedRttInfo(uint32_t* estimatedRtt, uint32_t* estimatedRttVariance);
+
+// KAST: milliseconds since the last packet of any kind arrived from the host on the control stream.
+// The client pings the host every 100 ms, so on a healthy link this stays far below one second; a
+// growing value means the network is silent. Returns -1 when the control stream is not a connected
+// ENet peer. This function may only be called between LiStartConnection() and LiStopConnection().
+int LiGetControlStreamSilenceMs(void);
 
 // This function sends a request to the server to execute the requested cmd id.
 int LiSendExecServerCmd(uint8_t cmdId);

@@ -1711,6 +1711,20 @@ bool LiGetEstimatedRttInfo(uint32_t* estimatedRtt, uint32_t* estimatedRttVarianc
     return ret;
 }
 
+// KAST: see Limelight.h. Read under enetMutex like LiGetEstimatedRttInfo(); lastReceiveTime is set by
+// ENet on every packet received from the host (enet/protocol.c).
+int LiGetControlStreamSilenceMs(void) {
+    int ret = -1;
+
+    PltLockMutex(&enetMutex);
+    if (peer != NULL && peer->state == ENET_PEER_STATE_CONNECTED) {
+        ret = (int)ENET_TIME_DIFFERENCE(enet_time_get(), peer->lastReceiveTime);
+    }
+    PltUnlockMutex(&enetMutex);
+
+    return ret;
+}
+
 // Starts the control stream
 int startControlStream(void) {
     int err;
@@ -1798,8 +1812,13 @@ int startControlStream(void) {
         // The 3DS can take a bit longer to set up when starting fresh
         enet_peer_timeout(peer, 2, 60000, 60000);
 #else
-        // Set the peer timeout to 10 seconds and limit backoff to 2x RTT
-        enet_peer_timeout(peer, 2, 10000, 10000);
+        // Set the peer timeout and limit backoff to 2x RTT. KAST: the timeout comes from the stream
+        // configuration (the "reconnect grace period" option); 0 keeps the historical 10 seconds.
+        {
+            enet_uint32 peerTimeoutMs = StreamConfig.controlPeerTimeoutMs > 0 ?
+                (enet_uint32)StreamConfig.controlPeerTimeoutMs : 10000;
+            enet_peer_timeout(peer, 2, peerTimeoutMs, peerTimeoutMs);
+        }
 #endif
     }
     else {
