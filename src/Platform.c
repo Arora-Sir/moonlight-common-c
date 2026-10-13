@@ -85,9 +85,7 @@ void* ThreadProc(void* context) {
 
     ctx->entry(ctx->context);
 
-#if defined(__vita__)
-free(ctx);
-#endif
+    free(ctx);
 
 #if defined(LC_WINDOWS) || defined(__vita__) || defined(__WIIU__) || defined(__3DS__)
     return 0;
@@ -292,6 +290,7 @@ int PltCreateThread(const char* name, ThreadEntry entry, void* context, PLT_THRE
         ctx->name = name;
 
         int err = pthread_create(&thread->thread, &attr, ThreadProc, ctx);
+        pthread_attr_destroy(&attr);
         if (err != 0) {
             free(ctx);
             return err;
