@@ -196,7 +196,7 @@ static void decodeInputData(PQUEUED_AUDIO_PACKET packet) {
                                (unsigned char*)(rtp + 1), dataLength,
                                decryptedOpusData, &dataLength)) {
             Limelog("Failed to decrypt audio packet (sequence number: %u)\n", rtp->sequenceNumber);
-            LC_ASSERT_VT(false);
+            // NOTE: A datagram that fails decryption came from the network, so debug builds drop it like release builds do.
             return;
         }
 
@@ -293,6 +293,24 @@ static void AudioReceiveThreadProc(void* context) {
         }
 
         rtp = (PRTP_PACKET)&packet->data[0];
+
+        // NOTE: The socket is not connected, so it also receives stale packets of an earlier session and datagrams from other senders.
+        // NOTE: Only audio (97) and FEC (127) belong to this stream. Everything else is dropped here and logged once per second with its first bytes.
+        if (rtp->packetType != 97 && rtp->packetType != 127) {
+            static uint64_t lastForeignLogMs;
+            static unsigned int foreignCount;
+            uint64_t nowMs = PltGetMillis();
+
+            foreignCount++;
+            if (lastForeignLogMs == 0 || nowMs - lastForeignLogMs >= 1000) {
+                Limelog("Dropped a foreign datagram on the audio port: type %u, %d bytes, starts %02x %02x %02x %02x %02x %02x %02x %02x, %u dropped so far\n",
+                        rtp->packetType, packet->header.size,
+                        packet->data[0], packet->data[1], packet->data[2], packet->data[3],
+                        packet->data[4], packet->data[5], packet->data[6], packet->data[7], foreignCount);
+                lastForeignLogMs = nowMs;
+            }
+            continue;
+        }
 
         if (!receivedDataFromPeer) {
             receivedDataFromPeer = true;
