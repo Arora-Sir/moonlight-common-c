@@ -411,11 +411,15 @@ static void queueFrameInvalidationTuple(uint32_t startFrame, uint32_t endFrame) 
         PQUEUED_FRAME_INVALIDATION_TUPLE qfit;
         qfit = malloc(sizeof(*qfit));
         if (qfit != NULL) {
+            int err;
+
             qfit->startFrame = startFrame;
             qfit->endFrame = endFrame;
-            if (LbqOfferQueueItem(&invalidReferenceFrameTuples, qfit, &qfit->entry) == LBQ_BOUND_EXCEEDED) {
-                // Too many invalidation tuples, so we need an IDR frame now
-                Limelog("RFI range list reached maximum size limit\n");
+
+            err = LbqOfferQueueItem(&invalidReferenceFrameTuples, qfit, &qfit->entry);
+            if (err != LBQ_SUCCESS) {
+                // The list is full, or the queue is shutting down. Either way the tuple was not taken, so free it and ask for an IDR frame.
+                Limelog("Failed to queue RFI range: %d\n", err);
                 free(qfit);
                 LiRequestIdrFrame();
             }
@@ -460,14 +464,14 @@ void connectionSendFrameFecStatus(PSS_FRAME_FEC_STATUS fecStatus) {
     PQUEUED_FRAME_FEC_STATUS queuedFecStatus = malloc(sizeof(*queuedFecStatus));
     if (queuedFecStatus != NULL) {
         queuedFecStatus->fecStatus = *fecStatus;
-        if (LbqOfferQueueItem(&frameFecStatusQueue, queuedFecStatus, &queuedFecStatus->entry) == LBQ_BOUND_EXCEEDED) {
+        if (LbqOfferQueueItem(&frameFecStatusQueue, queuedFecStatus, &queuedFecStatus->entry) != LBQ_SUCCESS) {
             free(queuedFecStatus);
         }
     }
 }
 
 void connectionSawFrame(uint32_t frameIndex) {
-    LC_ASSERT_VT(!isBefore16(frameIndex, lastSeenFrame));
+    LC_ASSERT_VT(!isBefore32(frameIndex, lastSeenFrame));
 
     uint64_t now = PltGetMillis();
 

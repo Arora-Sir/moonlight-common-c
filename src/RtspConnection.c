@@ -967,6 +967,7 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
     MicPortNumber = 0;
     memset(&MicPingPayload, 0, sizeof(MicPingPayload));
     encryptedRtspEnabled = serverInfo->rtspSessionUrl && strstr(serverInfo->rtspSessionUrl, "rtspenc://");
+    encryptionSequenceNumber = 0;
     encryptionCtx = PltCreateCryptoContext();
     decryptionCtx = PltCreateCryptoContext();
 

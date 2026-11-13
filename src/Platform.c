@@ -350,7 +350,9 @@ void PltClearEvent(PLT_EVENT* event) {
 #if defined(LC_WINDOWS)
     ResetEvent(*event);
 #else
+    PltLockMutex(&event->mutex);
     event->signalled = false;
+    PltUnlockMutex(&event->mutex);
 #endif
 }
 
