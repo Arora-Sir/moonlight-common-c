@@ -1,5 +1,8 @@
 #include "Limelight-internal.h"
 
+// Needed for the lock free RTT values below. Upstream gets it from a header this fork does not have yet.
+#include <stdatomic.h>
+
 // This is a private header, but it just contains some time macros
 #include <enet/time.h>
 
@@ -112,6 +115,9 @@ static int lastIntervalLossPercentage;
 static int lastConnectionStatusUpdate;
 static uint32_t currentEnetSequenceNumber;
 static uint64_t firstFrameTimeMs;
+
+static atomic_uint lastEnetRtt;
+static atomic_uint lastEnetRttVariance;
 
 static LINKED_BLOCKING_QUEUE invalidReferenceFrameTuples;
 static LINKED_BLOCKING_QUEUE frameFecStatusQueue;
@@ -361,6 +367,9 @@ int initializeControlStream(void) {
             supportsIdrFrameRequest = false;
         }
     }
+
+    atomic_store_explicit(&lastEnetRtt, 0, memory_order_relaxed);
+    atomic_store_explicit(&lastEnetRttVariance, 0, memory_order_relaxed);
 
     lastGoodFrame = 0;
     lastSeenFrame = 0;
@@ -1696,25 +1705,34 @@ bool isControlDataInTransit(void) {
 }
 
 bool LiGetEstimatedRttInfo(uint32_t* estimatedRtt, uint32_t* estimatedRttVariance) {
-    bool ret = false;
-
-    // We do not acquire enetMutex here because we're just reading metrics
-    // and observing a torn write every once in a while is totally fine.
-    // The peer pointer points to memory reserved inside the client object,
-    // so it's guaranteed that it will never go away underneath us.
-    if (peer != NULL && peer->state == ENET_PEER_STATE_CONNECTED) {
-        if (estimatedRtt != NULL) {
-            *estimatedRtt = peer->roundTripTime;
+    // Opportunistically update the cached RTT stats if nobody is using ENet right now
+    if (PltTryLockMutex(&enetMutex)) {
+        if (peer != NULL && peer->state == ENET_PEER_STATE_CONNECTED) {
+            atomic_store_explicit(&lastEnetRttVariance, peer->roundTripTimeVariance, memory_order_relaxed);
+            atomic_store_explicit(&lastEnetRtt, peer->roundTripTime, memory_order_release);
+        }
+        else {
+            atomic_store_explicit(&lastEnetRttVariance, 0, memory_order_relaxed);
+            atomic_store_explicit(&lastEnetRtt, 0, memory_order_release);
         }
 
-        if (estimatedRttVariance != NULL) {
-            *estimatedRttVariance = peer->roundTripTimeVariance;
-        }
-
-        ret = true;
+        PltUnlockMutex(&enetMutex);
     }
 
-    return ret;
+    // Return the cached values to the caller (if present)
+    uint32_t lastRtt = atomic_load_explicit(&lastEnetRtt, memory_order_acquire);
+    if (lastRtt == 0) {
+        return false;
+    }
+
+    if (estimatedRtt != NULL) {
+        *estimatedRtt = lastRtt;
+    }
+    if (estimatedRttVariance != NULL) {
+        *estimatedRttVariance = atomic_load_explicit(&lastEnetRttVariance, memory_order_relaxed);
+    }
+
+    return true;
 }
 
 // KAST: see Limelight.h. Read under enetMutex like LiGetEstimatedRttInfo(); lastReceiveTime is set by
